@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>教育訓練</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; color: #1e293b; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.08); margin-bottom: 12px; }
+  h1 { font-size: 1.15rem; margin: 0 0 4px; }
+  .sub { color: #64748b; font-size: .85rem; }
+  .btn { display: block; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: #2563eb; color: #fff; font-size: 1rem; font-weight: 600; margin-top: 12px; }
+  .btn.alt { background: #e2e8f0; color: #334155; }
+  .btn:disabled { opacity: .5; }
+  .msg { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: .9rem; white-space: pre-line; }
+  .err { background: #fee2e2; color: #b91c1c; }
+  .ok { background: #dcfce7; color: #166534; }
+  .warn { background: #fef3c7; color: #92400e; }
+  .vbox { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
+  video#vid { width: 100%; display: block; max-height: 60vh; background: #000; }
+  video#cam { position: absolute; right: 8px; bottom: 8px; width: 84px; height: 112px; object-fit: cover; border: 2px solid #fff; border-radius: 8px; transform: scaleX(-1); background: #222; }
+  .bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+  .bar > div { height: 100%; width: 0; background: #22c55e; }
+  #sig { width: 100%; height: 200px; border: 2px dashed #94a3b8; border-radius: 10px; background: #fff; touch-action: none; display: block; }
+  ul { padding-left: 20px; margin: 8px 0; font-size: .9rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="msg"></div>
+
+  <!-- 1 同意頁 -->
+  <div class="card" id="s-consent" hidden>
+    <h1 id="cTitle">教育訓練</h1>
+    <div class="sub" id="cSub"></div>
+    <ul>
+      <li>觀看時會開啟<b>前置鏡頭</b>，並在<b>開始與結束時各拍一張照片</b>存證。</li>
+      <li>影片不可快轉、不可倒退；離開本頁會自動暫停。</li>
+      <li>看完後需在畫面上<b>簽名</b>，才算完成。</li>
+      <li>照片與簽名僅供公司教育訓練出勤紀錄使用。</li>
+    </ul>
+    <button class="btn" id="btnAgree">同意並開啟鏡頭</button>
+  </div>
+
+  <!-- 2 觀看頁 -->
+  <div class="card" id="s-play" hidden>
+    <h1 id="pTitle"></h1>
+    <div class="vbox">
+      <video id="vid" playsinline webkit-playsinline preload="auto" controlsList="nodownload noplaybackrate" disablePictureInPicture></video>
+      <video id="cam" muted playsinline></video>
+    </div>
+    <div class="bar"><div id="prog"></div></div>
+    <div class="sub" id="pInfo" style="margin-top:6px;"></div>
+    <button class="btn" id="btnPlay">▶ 播放</button>
+  </div>
+
+  <!-- 3 簽名頁 -->
+  <div class="card" id="s-sign" hidden>
+    <h1>觀看完成，請簽名</h1>
+    <div class="sub" style="margin-bottom:8px;">請用手指在下方框內簽名</div>
+    <canvas id="sig"></canvas>
+    <button class="btn alt" id="btnClear">重寫</button>
+    <button class="btn" id="btnSubmit">送出</button>
+  </div>
+
+  <!-- 4 完成 -->
+  <div class="card" id="s-done" hidden>
+    <h1>✅ 已完成</h1>
+    <div class="sub" id="dInfo"></div>
+  </div>
+</div>
+
+<canvas id="snap" hidden></canvas>
+
+<script>
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbwA482cqxXjEucxwQPLEXzHZSndPRniupGw4vceA7SRstJ3dNIxbZwpckkxcZ8YLRW0/exec';
+
+var token = new URLSearchParams(location.search).get('t') || '';
+var info = null, stream = null, watched = 0, lastT = null, lastGood = 0, endedOnce = false, finishing = false;
+var strokes = 0, endPhoto = '';
+
+function $(id) { return document.getElementById(id); }
+function show(id) { ['s-consent', 's-play', 's-sign', 's-done'].forEach(function (x) { $(x).hidden = (x !== id); }); }
+function say(t, cls) { $('msg').innerHTML = t ? '<div class="msg ' + (cls || 'err') + '"></div>' : ''; if (t) $('msg').firstChild.textContent = t; }
+
+async function apiGet(op) {
+  var r = await fetch(GAS_URL + (GAS_URL.indexOf('?') > -1 ? '&' : '?') + 'a=train&op=' + op + '&t=' + encodeURIComponent(token));
+  return r.json();
+}
+async function apiPost(obj) {
+  var r = await fetch(GAS_URL + (GAS_URL.indexOf('?') > -1 ? '&' : '?') + 'a=train', {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(obj)
+  });
+  return r.json();
+}
+
+/* ---------- 鏡頭 ---------- */
+async function openCam() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('NOCAM');
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+  var cam = $('cam');
+  cam.srcObject = stream;
+  await cam.play();
+  await new Promise(function (r) { setTimeout(r, 1200); });
+  stream.getVideoTracks()[0].addEventListener('ended', onCamLost);
+}
+function stopCam() {
+  if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+}
+function snap() {
+  var cam = $('cam'), w = cam.videoWidth, h = cam.videoHeight;
+  if (!w || !h) return '';
+  var sc = Math.min(1, 640 / w), c = $('snap');
+  c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+  c.getContext('2d').drawImage(cam, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.7);
+}
+function onCamLost() {
+  if (finishing) return;
+  $('vid').pause();
+  say('鏡頭已中斷，影片已暫停。請重新整理本頁後再觀看（會重新開始）。', 'err');
+  $('btnPlay').disabled = true;
+}
+
+/* ---------- 啟動 ---------- */
+async function init() {
+  if (!token) { say('連結無效（缺少代碼）'); return; }
+  if (/^請貼上/.test(GAS_URL)) { say('尚未設定 GAS_URL'); return; }
+  try {
+    var r = await apiGet('info');
+    if (!r.success) { say(r.message); return; }
+    info = r.data;
+    if (info.done) { show('s-done'); $('dInfo').textContent = info.title + '　已於 ' + info.doneAt + ' 完成'; return; }
+    $('cTitle').textContent = info.title;
+    $('cSub').textContent = info.name + ' 您好' + (info.deadline ? '　截止日：' + info.deadline : '');
+    show('s-consent');
+  } catch (e) {
+    say('連線失敗，請稍後再試：' + e.message);
+  }
+}
+
+$('btnAgree').addEventListener('click', async function () {
+  var b = this; b.disabled = true; say('');
+  try {
+    await openCam();
+  } catch (e) {
+    b.disabled = false;
+    if (e && e.name === 'NotAllowedError') say('您拒絕了鏡頭權限，無法觀看。請允許鏡頭後再試一次。');
+    else say('此瀏覽器無法啟動鏡頭。\n請點右上角選單，改用 Safari / Chrome 開啟本頁。');
+    return;
+  }
+  var photo = snap();
+  if (!photo) { b.disabled = false; stopCam(); say('無法取得鏡頭畫面，請重試'); return; }
+  try {
+    var r = await apiPost({ op: 'start', t: token, photo: photo, device: navigator.userAgent });
+    if (!r.success) { b.disabled = false; stopCam(); say(r.message); return; }
+  } catch (e) {
+    b.disabled = false; stopCam(); say('連線失敗：' + e.message); return;
+  }
+  $('pTitle').textContent = info.title;
+  var v = $('vid');
+  v.src = info.videoUrl;
+  v.load();
+  show('s-play');
+});
+
+/* ---------- 影片控制 ---------- */
+(function () {
+  var v = $('vid');
+  v.controls = false;
+  $('btnPlay').addEventListener('click', function () {
+    if (v.paused) v.play().catch(function (e) { say('無法播放：' + e.message); }); else v.pause();
+  });
+  v.addEventListener('play', function () { $('btnPlay').textContent = '⏸ 暫停'; });
+  v.addEventListener('pause', function () { $('btnPlay').textContent = '▶ 播放'; });
+  v.addEventListener('ratechange', function () { if (v.playbackRate !== 1) v.playbackRate = 1; });
+  v.addEventListener('timeupdate', function () {
+    var t = v.currentTime;
+    if (!v.paused && !v.seeking && lastT !== null) {
+      var d = t - lastT;
+      if (d > 0 && d < 1.5) watched += d;
+    }
+    lastT = t;
+    if (!v.seeking) lastGood = t;
+    if (v.duration) {
+      $('prog').style.width = Math.min(100, t / v.duration * 100) + '%';
+      $('pInfo').textContent = '已實際觀看 ' + Math.floor(watched / 60) + ' 分 ' + ('0' + Math.floor(watched % 60)).slice(-2) + ' 秒 ／ 影片 ' + Math.floor(v.duration / 60) + ' 分 ' + ('0' + Math.floor(v.duration % 60)).slice(-2) + ' 秒';
+    }
+  });
+  v.addEventListener('seeking', function () {
+    if (Math.abs(v.currentTime - lastGood) > 1.5) v.currentTime = lastGood;
+    lastT = null;
+  });
+  v.addEventListener('error', function () { say('影片載入失敗，請稍後再試或聯絡主管'); });
+  v.addEventListener('ended', function () {
+    if (endedOnce) return;
+    if (watched < v.duration * 0.9) {
+      say('實際觀看時間不足，請重新觀看。', 'warn');
+      watched = 0; lastGood = 0; lastT = null; v.currentTime = 0;
+      return;
+    }
+    endedOnce = true; finishing = true;
+    endPhoto = snap();
+    stopCam();
+    say('');
+    show('s-sign');
+    sigInit();
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && !v.paused) { v.pause(); say('您離開了畫面，影片已暫停。', 'warn'); }
+  });
+})();
+
+/* ---------- 簽名 ---------- */
+var sg = $('sig'), sctx = null, drawing = false;
+function sigInit() {
+  var r = sg.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  sg.width = Math.round(r.width * dpr); sg.height = Math.round(r.height * dpr);
+  sctx = sg.getContext('2d');
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sctx.fillStyle = '#fff'; sctx.fillRect(0, 0, r.width, r.height);
+  sctx.lineWidth = 2.5; sctx.lineCap = 'round'; sctx.lineJoin = 'round'; sctx.strokeStyle = '#111';
+  strokes = 0;
+}
+function pos(e) { var r = sg.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+sg.addEventListener('pointerdown', function (e) {
+  drawing = true; sg.setPointerCapture(e.pointerId);
+  var p = pos(e); sctx.beginPath(); sctx.moveTo(p.x, p.y); sctx.lineTo(p.x + 0.1, p.y + 0.1); sctx.stroke(); strokes++;
+});
+sg.addEventListener('pointermove', function (e) {
+  if (!drawing) return;
+  var p = pos(e); sctx.lineTo(p.x, p.y); sctx.stroke(); sctx.beginPath(); sctx.moveTo(p.x, p.y); strokes++;
+});
+['pointerup', 'pointercancel'].forEach(function (n) { sg.addEventListener(n, function () { drawing = false; }); });
+$('btnClear').addEventListener('click', sigInit);
+
+$('btnSubmit').addEventListener('click', async function () {
+  if (strokes < 15) { say('請先完成簽名', 'warn'); return; }
+  var b = this; b.disabled = true; say('');
+  try {
+    var r = await apiPost({
+      op: 'finish', t: token, endPhoto: endPhoto, signature: sg.toDataURL('image/png'),
+      watchSec: Math.round(watched), videoSec: Math.round($('vid').duration || 0), ended: true, device: navigator.userAgent
+    });
+    if (!r.success) { b.disabled = false; say(r.message); return; }
+    show('s-done');
+    $('dInfo').textContent = info.title + '　已完成，謝謝您。可關閉此頁面。';
+  } catch (e) {
+    b.disabled = false; say('送出失敗，請確認網路後再按一次：' + e.message);
+  }
+});
+
+init();
+</script>
+</body>
+</html>
